@@ -62,5 +62,3 @@ python app.py
 Contribuições são sempre bem-vindas! Se você tiver sugestões de melhorias (como adicionar um alerta sonoro ou interface gráfica), sinta-se à vontade para abrir uma *Issue* ou enviar um *Pull Request*.
 
 ---
-
-Desenvolvido por [Seu Nome]
