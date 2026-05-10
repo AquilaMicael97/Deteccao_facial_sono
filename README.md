@@ -30,8 +30,8 @@ Este projeto utiliza inteligência artificial e visão computacional para detect
 
 1. **Clone o repositório:**
 ```bash
-git clone https://github.com/seu-usuario/nome-do-repositorio.git
-cd nome-do-repositorio
+git clone https://github.com/AquilaMicael97/Deteccao_facial_sono
+cd Deteccao_facial_sono
 
 ```
 
@@ -45,7 +45,7 @@ pip install opencv-python mediapipe numpy
 
 3. **Execute o script:**
 ```bash
-python nome_do_seu_arquivo.py
+python app.py
 
 ```
 
