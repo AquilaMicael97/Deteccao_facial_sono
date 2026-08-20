@@ -2,9 +2,13 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
+import os
 
-mp_drawing = mp.solutions.drawing_utils
-mp_face_mesh = mp.solutions.face_mesh
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
+from mediapipe.tasks.python.vision import drawing_utils as mp_drawing
+
+modelo = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'face_landmarker.task')
 
 p_olho_esq = [385, 380, 387, 373, 362, 263]
 p_olho_dir = [160, 144, 158, 153, 33, 133]
@@ -39,17 +43,34 @@ def calculo_mar(face,p_boca):
 
 ear_limiar = 0.3
 mar_limiar = 0.1
+mar_bocejo = 0.4
+piscadas_limiar = 5
+t_bocejo = 1.0
+alerta_bocejo = 3.0
 dormindo = 0
+bocejando = 0
+bocejo_contado = False
+contagem_bocejos = 0
+t_boca = 0.0
+t_ultimo_bocejo = None
 contagem_piscadas = 0
 c_tempo = 0
 contagem_temporaria = 0
 contagem_lista = []
 
 t_piscadas = time.time()
+carimbo = 0
 
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
 
-with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5) as facemesh:
+opcoes = mp_vision.FaceLandmarkerOptions(
+    base_options=mp_python.BaseOptions(model_asset_path=modelo),
+    running_mode=mp_vision.RunningMode.VIDEO,
+    num_faces=1,
+    min_face_detection_confidence=0.5,
+    min_tracking_confidence=0.5)
+
+with mp_vision.FaceLandmarker.create_from_options(opcoes) as facemesh:
     while cap.isOpened():
         sucesso, frame = cap.read()
         if not sucesso:
@@ -57,16 +78,16 @@ with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence
             continue
         comprimento, largura, _ = frame.shape
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        saida_facemesh = facemesh.process(frame)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        imagem_mp = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+        carimbo = max(int(time.time()*1000), carimbo+1)
+        saida_facemesh = facemesh.detect_for_video(imagem_mp, carimbo)
 
         try:
-            for face_landmarks in saida_facemesh.multi_face_landmarks:
-                mp_drawing.draw_landmarks(frame, face_landmarks, mp_face_mesh.FACEMESH_CONTOURS,
+            for face in saida_facemesh.face_landmarks:
+                mp_drawing.draw_landmarks(frame, face, mp_vision.FaceLandmarksConnections.FACE_LANDMARKS_CONTOURS,
                     landmark_drawing_spec = mp_drawing.DrawingSpec(color=(255,102,102),thickness=1,circle_radius=1),
                     connection_drawing_spec = mp_drawing.DrawingSpec(color=(102,204,0),thickness=1,circle_radius=1))
-                face = face_landmarks.landmark
                 for id_coord, coord_xyz in enumerate(face):
                     if id_coord in p_olhos:
                        coord_cv = mp_drawing._normalized_to_pixel_coordinates(coord_xyz.x,coord_xyz.y, largura, comprimento)
@@ -93,14 +114,39 @@ with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence
                     contagem_temporaria = contagem_piscadas
                     contagem_lista.append(piscadas_ps)
                     contagem_lista = contagem_lista if (len(contagem_lista)<=60) else contagem_lista[-60:]
-                piscadas_pm = 15 if tempo_decorrido<=60 else sum(contagem_lista)
+                piscadas_pm = sum(contagem_lista)
+                janela_cheia = len(contagem_lista) >= 60
 
                 tempo = (t_final-t_inicial) if dormindo == 1 else 0.0
 
-                cv2.rectangle(frame, (200, 400), (450, 440), (109, 233, 219), -1)
-                cv2.putText(frame, f"{'COM SONOLENCIA' if piscadas_pm < 10 or tempo>=1.5 else 'SEM SONOLENCIA'}", (210, 430),
-                                        cv2.FONT_HERSHEY_DUPLEX, 
-                                        0.85, (58,58,55), 1)
+                if mar >= mar_bocejo:
+                    t_boca = t_final if bocejando == 0 else t_boca
+                    bocejando = 1
+                else:
+                    bocejando = 0
+                    bocejo_contado = False
+
+                if bocejando == 1 and (t_final-t_boca) >= t_bocejo:
+                    t_ultimo_bocejo = t_final
+                    if not bocejo_contado:
+                        contagem_bocejos = contagem_bocejos+1
+                        bocejo_contado = True
+
+                bocejo_recente = t_ultimo_bocejo is not None and (t_final-t_ultimo_bocejo) <= alerta_bocejo
+                poucas_piscadas = janela_cheia and piscadas_pm < piscadas_limiar
+                com_sonolencia = poucas_piscadas or tempo>=1.5 or bocejo_recente
+                cor_caixa = (0, 0, 255) if com_sonolencia else (109, 233, 219)
+                cor_texto = (255, 255, 255) if com_sonolencia else (58, 58, 55)
+
+                cv2.rectangle(frame, (200, 355), (450, 395), (40, 40, 40), -1)
+                cv2.putText(frame, f"MAR {mar:.2f}  PISC {piscadas_pm}/min{'' if janela_cheia else '?'}  BOC {contagem_bocejos}", (210, 383),
+                                        cv2.FONT_HERSHEY_DUPLEX,
+                                        0.6, (255, 255, 255), 1)
+
+                cv2.rectangle(frame, (200, 400), (450, 440), cor_caixa, -1)
+                cv2.putText(frame, f"{'COM SONOLENCIA' if com_sonolencia else 'SEM SONOLENCIA'}", (210, 430),
+                                        cv2.FONT_HERSHEY_DUPLEX,
+                                        0.85, cor_texto, 1)
 
         except:
             pass
